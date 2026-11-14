@@ -41,8 +41,13 @@ MODULE_EXPORT const char *obs_module_description(void)
 }
 
 #ifndef _WIN32
-#error "This first version supports Windows only (uses the HWND display)."
-#endif
+// Non-Windows builds (macOS/Linux CI jobs) compile an empty module.
+bool obs_module_load(void)
+{
+	blog(LOG_WARNING, "[Scene Multiview] this version supports Windows only");
+	return true;
+}
+#else // ===================== Windows implementation =====================
 
 static constexpr int kMaxCells = 8;
 static const char *kDockId = "scene_multiview";
@@ -634,3 +639,5 @@ void obs_module_unload(void)
 }
 
 #include "scene-multiview.moc"
+
+#endif // _WIN32
