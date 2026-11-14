@@ -8,6 +8,7 @@
 #include <graphics/graphics.h>
 
 #include <QAction>
+#include <QObject>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFrame>
@@ -30,6 +31,11 @@
 #include <vector>
 
 OBS_DECLARE_MODULE()
+
+// Keeps AUTOMOC happy on platforms where the Windows-only classes are compiled out.
+class MocAnchor : public QObject {
+	Q_OBJECT
+};
 
 MODULE_EXPORT const char *obs_module_name(void)
 {
@@ -54,10 +60,10 @@ static const char *kDockId = "scene_multiview";
 
 // ---------------------------------------------------------------- model ----
 struct Model {
-	int count = 8;                       // 2, 4, 6 or 8
-	std::vector<std::string> scenes;     // scene name per cell (size kMaxCells)
-	int clickMode = 0;                   // 0 = Auto (Preview in Studio Mode), 1 = always Program
-	bool edit = true;                    // show scene pickers under each cell
+	int count = 8;                   // 2, 4, 6 or 8
+	std::vector<std::string> scenes; // scene name per cell (size kMaxCells)
+	int clickMode = 0;               // 0 = Auto (Preview in Studio Mode), 1 = always Program
+	bool edit = true;                // show scene pickers under each cell
 	Model() : scenes(kMaxCells) {}
 };
 static Model g_model;
@@ -311,8 +317,9 @@ public:
 			}
 			combo->setCurrentIndex(i < 0 ? 0 : i);
 		}
-		label->setText(assigned.empty() ? QStringLiteral("-")
-						: QString::fromStdString(std::to_string(index + 1) + "  \u00B7  " + assigned));
+		label->setText(assigned.empty()
+				       ? QStringLiteral("-")
+				       : QString::fromStdString(std::to_string(index + 1) + "  \u00B7  " + assigned));
 		combo->setVisible(showPicker);
 		label->setVisible(!showPicker);
 		disp->setScene(assigned);
@@ -425,7 +432,10 @@ private:
 		connect(m.addAction("Open in window"), &QAction::triggered, [] { openProjector(nullptr); });
 		QMenu *fs = m.addMenu("Fullscreen on screen");
 		for (QScreen *s : QGuiApplication::screens()) {
-			QString t = QString("%1  (%2x%3)").arg(s->name()).arg(s->geometry().width()).arg(s->geometry().height());
+			QString t = QString("%1  (%2x%3)")
+					    .arg(s->name())
+					    .arg(s->geometry().width())
+					    .arg(s->geometry().height());
 			connect(fs->addAction(t), &QAction::triggered, [s] { openProjector(s); });
 		}
 		m.exec(gp);
@@ -638,6 +648,6 @@ void obs_module_unload(void)
 	obs_frontend_remove_event_callback(eventCb, nullptr);
 }
 
-#include "scene-multiview.moc"
-
 #endif // _WIN32
+
+#include "scene-multiview.moc"
