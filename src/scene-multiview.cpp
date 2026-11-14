@@ -42,14 +42,14 @@ MODULE_EXPORT const char *obs_module_description(void)
 	return "Dock with 2/4/6/8 selectable live scene previews";
 }
 
-static constexpr int kMaxCells = 8;
+static constexpr int kMaxCells = 16; // 2 columns x up to 8 rows
 static const char *kDockId = "scene_multiview";
 
 // ---------------------------------------------------------------- model ----
 struct Model {
-	int count = 8;                   // 2, 4, 6 or 8
+	int rows = 4;                    // scene rows (2 columns each): 2, 4, 6 or 8
 	std::vector<std::string> scenes; // scene name per cell (size kMaxCells)
-	int clickMode = 0;               // 0 = Auto (Preview in Studio Mode), 1 = always Program
+	std::string previewScene;        // plugin-side Preview bus (used when Studio Mode is off)
 	bool edit = true;                // show scene pickers under each cell
 	Model() : scenes(kMaxCells) {}
 };
@@ -333,6 +333,57 @@ private:
 	}
 };
 
+// -------------------------------------------------------------- bus cell ----
+class BusCell : public QFrame {
+	Q_OBJECT
+public:
+	BusCell(const QString &t, const QString &color, QWidget *parent) : QFrame(parent), title(t)
+	{
+		setObjectName("bus");
+		setStyleSheet(QString("QFrame#bus{border:4px solid %1;background:#000;}").arg(color));
+		auto *l = new QVBoxLayout(this);
+		l->setContentsMargins(3, 3, 3, 3);
+		l->setSpacing(2);
+		disp = new DisplayWidget(this);
+		label = new QLabel(this);
+		label->setAlignment(Qt::AlignCenter);
+		label->setStyleSheet(QString("color:%1;font-weight:bold;").arg(color));
+		l->addWidget(disp, 1);
+		l->addWidget(label);
+		connect(disp, &DisplayWidget::contextRequested, this, &BusCell::contextRequested);
+	}
+
+	void update(const std::string &scene)
+	{
+		disp->setScene(scene);
+		label->setText(scene.empty() ? title : title + QString::fromStdString("  \u00B7  " + scene));
+	}
+
+signals:
+	void contextRequested(const QPoint &globalPos);
+
+private:
+	QString title;
+	DisplayWidget *disp;
+	QLabel *label;
+};
+
+// Send the Preview bus to Program. In Studio Mode this uses OBS' own transition button.
+static void takeToProgram()
+{
+	if (obs_frontend_preview_program_mode_active()) {
+		obs_frontend_preview_program_trigger_transition();
+		return;
+	}
+	if (g_model.previewScene.empty())
+		return;
+	obs_source_t *s = obs_get_source_by_name(g_model.previewScene.c_str());
+	if (!s)
+		return;
+	obs_frontend_set_current_scene(s);
+	obs_source_release(s);
+}
+
 // ------------------------------------------------------------------ grid ----
 class MultiviewGrid;
 static void openProjector(QScreen *fullscreenOn);
@@ -357,14 +408,35 @@ public:
 			delete c;
 		}
 		cells.clear();
-		for (int i = 0; i < kMaxCells; i++) {
+		delete pvw;
+		delete pgm;
+		delete takeBtn;
+		pvw = pgm = nullptr;
+		takeBtn = nullptr;
+		for (int i = 0; i < 12; i++) {
 			grid->setRowStretch(i, 0);
 			grid->setColumnStretch(i, 0);
 		}
-		const int n = g_model.count;
-		const int cols = n <= 2 ? 2 : n <= 4 ? 2 : n <= 6 ? 3 : 4;
-		const int rows = (n + cols - 1) / cols;
-		for (int i = 0; i < n; i++) {
+
+		pvw = new BusCell("PREVIEW", "#43a047", this);
+		pgm = new BusCell("PROGRAM", "#e53935", this);
+		connect(pvw, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
+		connect(pgm, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
+		grid->addWidget(pvw, 0, 0);
+		grid->addWidget(pgm, 0, 1);
+
+		int first = 1;
+		if (allowPickers) {
+			takeBtn = new QPushButton("TAKE  \u25B6  Preview \u2192 Program", this);
+			takeBtn->setMinimumHeight(34);
+			takeBtn->setStyleSheet("font-weight:bold;");
+			connect(takeBtn, &QPushButton::clicked, this, [] { takeToProgram(); });
+			grid->addWidget(takeBtn, 1, 0, 1, 2);
+			first = 2;
+		}
+
+		const int rows = g_model.rows;
+		for (int i = 0; i < rows * 2; i++) {
 			auto *c = new Cell(i, this);
 			connect(c, &Cell::sceneChosen, this, [](int idx, const std::string &name) {
 				g_model.scenes[idx] = name;
@@ -372,13 +444,14 @@ public:
 			});
 			connect(c, &Cell::cellClicked, this, &MultiviewGrid::onClick);
 			connect(c, &Cell::contextRequested, this, &MultiviewGrid::showMenu);
-			grid->addWidget(c, i / cols, i % cols);
+			grid->addWidget(c, first + i / 2, i % 2);
 			cells.push_back(c);
 		}
+		grid->setRowStretch(0, 3);
 		for (int r = 0; r < rows; r++)
-			grid->setRowStretch(r, 1);
-		for (int k = 0; k < cols; k++)
-			grid->setColumnStretch(k, 1);
+			grid->setRowStretch(first + r, 1);
+		grid->setColumnStretch(0, 1);
+		grid->setColumnStretch(1, 1);
 		refresh();
 	}
 
@@ -386,7 +459,12 @@ public:
 	{
 		auto names = sceneNames();
 		std::string prog = currentName(false);
-		std::string prev = obs_frontend_preview_program_mode_active() ? currentName(true) : std::string();
+		std::string prev = obs_frontend_preview_program_mode_active() ? currentName(true)
+									      : g_model.previewScene;
+		if (pvw)
+			pvw->update(prev);
+		if (pgm)
+			pgm->update(prog);
 		for (size_t i = 0; i < cells.size(); i++) {
 			const std::string &a = g_model.scenes[i];
 			int tally = (!a.empty() && a == prog) ? 2 : (!a.empty() && a == prev) ? 1 : 0;
@@ -398,20 +476,30 @@ private:
 	bool allowPickers;
 	QGridLayout *grid;
 	std::vector<Cell *> cells;
+	BusCell *pvw = nullptr;
+	BusCell *pgm = nullptr;
+	QPushButton *takeBtn = nullptr;
 
+	// Click = send to Preview bus (OBS preview if Studio Mode is on).
+	// Double-click = straight to Program.
 	void onClick(int i, bool dbl)
 	{
-		const std::string &name = g_model.scenes[i];
+		const std::string name = g_model.scenes[i];
 		if (name.empty())
 			return;
+		bool studio = obs_frontend_preview_program_mode_active();
+		if (!dbl && !studio) {
+			g_model.previewScene = name;
+			refreshAll();
+			return;
+		}
 		obs_source_t *s = obs_get_source_by_name(name.c_str());
 		if (!s)
 			return;
-		bool studio = obs_frontend_preview_program_mode_active();
-		if (studio && g_model.clickMode == 0 && !dbl)
-			obs_frontend_set_current_preview_scene(s);
-		else
+		if (dbl)
 			obs_frontend_set_current_scene(s);
+		else
+			obs_frontend_set_current_preview_scene(s);
 		obs_source_release(s);
 	}
 
@@ -478,18 +566,13 @@ public:
 		auto *v = new QVBoxLayout(this);
 		v->setContentsMargins(4, 4, 4, 4);
 		auto *h = new QHBoxLayout;
-		h->addWidget(new QLabel("Screens"));
+		h->addWidget(new QLabel("Rows"));
 		countBox = new QComboBox;
 		for (int n : {2, 4, 6, 8})
-			countBox->addItem(QString::number(n), n);
+			countBox->addItem(QString("%1 rows (%2 scenes)").arg(n).arg(n * 2), n);
 		h->addWidget(countBox);
 		editBox = new QCheckBox("Choose scenes");
 		h->addWidget(editBox);
-		h->addWidget(new QLabel("Click"));
-		clickBox = new QComboBox;
-		clickBox->addItem("Preview in Studio Mode, else Program", 0);
-		clickBox->addItem("Always Program", 1);
-		h->addWidget(clickBox);
 		auto *win = new QPushButton("Window");
 		h->addWidget(win);
 		h->addStretch(1);
@@ -498,29 +581,26 @@ public:
 		v->addWidget(grid, 1);
 
 		connect(countBox, &QComboBox::activated, this, [this](int i) {
-			g_model.count = countBox->itemData(i).toInt();
+			g_model.rows = countBox->itemData(i).toInt();
 			rebuildAll();
 		});
 		connect(editBox, &QCheckBox::toggled, this, [](bool on) {
 			g_model.edit = on;
 			refreshAll();
 		});
-		connect(clickBox, &QComboBox::activated, this,
-			[this](int i) { g_model.clickMode = clickBox->itemData(i).toInt(); });
 		connect(win, &QPushButton::clicked, this, [] { openProjector(nullptr); });
 		syncFromModel();
 	}
 
 	void syncFromModel()
 	{
-		QSignalBlocker a(countBox), b(editBox), c(clickBox);
-		countBox->setCurrentIndex(std::max(0, countBox->findData(g_model.count)));
+		QSignalBlocker a(countBox), b(editBox);
+		countBox->setCurrentIndex(std::max(0, countBox->findData(g_model.rows)));
 		editBox->setChecked(g_model.edit);
-		clickBox->setCurrentIndex(std::max(0, clickBox->findData(g_model.clickMode)));
 	}
 
 private:
-	QComboBox *countBox, *clickBox;
+	QComboBox *countBox;
 	QCheckBox *editBox;
 	MultiviewGrid *grid;
 };
@@ -544,8 +624,8 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 {
 	if (saving) {
 		obs_data_t *d = obs_data_create();
-		obs_data_set_int(d, "count", g_model.count);
-		obs_data_set_int(d, "click_mode", g_model.clickMode);
+		obs_data_set_int(d, "rows", g_model.rows);
+		obs_data_set_string(d, "preview_scene", g_model.previewScene.c_str());
 		obs_data_set_bool(d, "edit", g_model.edit);
 		obs_data_array_t *arr = obs_data_array_create();
 		for (auto &s : g_model.scenes) {
@@ -564,10 +644,10 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 	g_model = Model();
 	obs_data_t *d = obs_data_get_obj(save_data, "scene_multiview");
 	if (d) {
-		int c = (int)obs_data_get_int(d, "count");
-		if (c == 2 || c == 4 || c == 6 || c == 8)
-			g_model.count = c;
-		g_model.clickMode = (int)obs_data_get_int(d, "click_mode") == 1 ? 1 : 0;
+		int r = (int)obs_data_get_int(d, "rows");
+		if (r == 2 || r == 4 || r == 6 || r == 8)
+			g_model.rows = r;
+		g_model.previewScene = obs_data_get_string(d, "preview_scene");
 		if (obs_data_has_user_value(d, "edit"))
 			g_model.edit = obs_data_get_bool(d, "edit");
 		obs_data_array_t *arr = obs_data_get_array(d, "cells");
