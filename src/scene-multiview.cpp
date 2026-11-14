@@ -320,9 +320,7 @@ public:
 			}
 			combo->setCurrentIndex(i < 0 ? 0 : i);
 		}
-		label->setText(assigned.empty()
-				       ? QStringLiteral("-")
-				       : QString::fromStdString(std::to_string(index + 1) + "  \u00B7  " + assigned));
+		label->setText(assigned.empty() ? QStringLiteral("-") : QString::fromStdString(assigned));
 		combo->setVisible(showPicker);
 		label->setVisible(!showPicker);
 		disp->setScene(assigned);
@@ -342,7 +340,7 @@ private:
 
 	void setTally(int t)
 	{
-		const char *col = t == 2 ? "#e53935" : t == 1 ? "#43a047" : "#2a2f3a";
+		const char *col = t == 2 ? "#e53935" : t == 1 ? "#43a047" : "#6b7686";
 		setStyleSheet(QString("QFrame#svcell{border:3px solid %1;background:#000;}").arg(col));
 	}
 };
@@ -382,20 +380,30 @@ private:
 	QLabel *label;
 };
 
-// Send the Preview bus to Program. In Studio Mode this uses OBS' own transition button.
+// Cut a scene to Program (plugin mode, Studio Mode off): the scene that was on air goes to Preview.
+static void cutToProgram(const std::string &name)
+{
+	if (name.empty())
+		return;
+	const std::string old = currentName(false);
+	obs_source_t *s = obs_get_source_by_name(name.c_str());
+	if (!s)
+		return;
+	obs_frontend_set_current_scene(s);
+	obs_source_release(s);
+	if (!obs_frontend_preview_program_mode_active() && !old.empty() && old != name)
+		g_model.previewScene = old;
+}
+
+// TAKE button. In Studio Mode this uses OBS' own transition button.
 static void takeToProgram()
 {
 	if (obs_frontend_preview_program_mode_active()) {
 		obs_frontend_preview_program_trigger_transition();
 		return;
 	}
-	if (g_model.previewScene.empty())
-		return;
-	obs_source_t *s = obs_get_source_by_name(g_model.previewScene.c_str());
-	if (!s)
-		return;
-	obs_frontend_set_current_scene(s);
-	obs_source_release(s);
+	cutToProgram(g_model.previewScene);
+	refreshAll();
 }
 
 // ------------------------------------------------------------------ grid ----
@@ -405,11 +413,13 @@ static void openProjector(QScreen *fullscreenOn);
 class MultiviewGrid : public QWidget {
 	Q_OBJECT
 public:
+	// pickers = true: dock (Preview/Program + TAKE pinned on top, scenes scroll, 2 columns, 16:9 cells)
+	// pickers = false: projector window (fills the window, 4 scene columns)
 	explicit MultiviewGrid(bool pickers, QWidget *parent = nullptr) : QWidget(parent), allowPickers(pickers)
 	{
-		grid = new QGridLayout(this);
-		grid->setContentsMargins(0, 0, 0, 0);
-		grid->setSpacing(4);
+		root = new QVBoxLayout(this);
+		root->setContentsMargins(0, 0, 0, 0);
+		root->setSpacing(4);
 		g_grids.push_back(this);
 		rebuild();
 	}
@@ -417,60 +427,84 @@ public:
 
 	void rebuild()
 	{
-		for (auto *c : cells) {
-			grid->removeWidget(c);
-			delete c;
-		}
 		cells.clear();
-		delete pvw;
-		delete pgm;
-		delete takeBtn;
 		pvw = pgm = nullptr;
 		takeBtn = nullptr;
-		for (int i = 0; i < 12; i++) {
-			grid->setRowStretch(i, 0);
-			grid->setColumnStretch(i, 0);
+		delete topW;
+		topW = nullptr;
+		if (scroll) {
+			delete scroll;
+			scroll = nullptr;
+			scenesW = nullptr;
+		} else {
+			delete scenesW;
+			scenesW = nullptr;
 		}
 
-		pvw = new BusCell("PREVIEW", "#43a047", allowPickers, this);
-		pgm = new BusCell("PROGRAM", "#e53935", allowPickers, this);
+		// --- top: Preview | Program (+ TAKE) ---
+		topW = new QWidget(this);
+		auto *tg = new QGridLayout(topW);
+		tg->setContentsMargins(0, 0, 0, 0);
+		tg->setSpacing(4);
+		pvw = new BusCell("PREVIEW", "#43a047", allowPickers, topW);
+		pgm = new BusCell("PROGRAM", "#e53935", allowPickers, topW);
 		connect(pvw, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
 		connect(pgm, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
-		grid->addWidget(pvw, 0, 0);
-		grid->addWidget(pgm, 0, 1);
-
-		int first = 1;
+		tg->addWidget(pvw, 0, 0);
+		tg->addWidget(pgm, 0, 1);
+		tg->setColumnStretch(0, 1);
+		tg->setColumnStretch(1, 1);
 		if (allowPickers) {
-			takeBtn = new QPushButton("TAKE  \u25B6  Preview \u2192 Program", this);
+			takeBtn = new QPushButton("TAKE  ▶  Preview → Program", topW);
 			takeBtn->setMinimumHeight(34);
 			takeBtn->setStyleSheet("font-weight:bold;");
 			connect(takeBtn, &QPushButton::clicked, this, [] { takeToProgram(); });
-			grid->addWidget(takeBtn, 1, 0, 1, 2);
-			first = 2;
+			tg->addWidget(takeBtn, 1, 0, 1, 2);
+		} else {
+			tg->setRowStretch(0, 1);
 		}
 
-		const int rows = g_model.rows;
-		for (int i = 0; i < rows * 2; i++) {
-			auto *c = new Cell(i, allowPickers, this);
+		// --- scenes ---
+		scenesW = new QWidget;
+		auto *sg = new QGridLayout(scenesW);
+		sg->setContentsMargins(0, 0, 0, 0);
+		sg->setSpacing(4);
+		const int n = g_model.rows * 2;
+		const int cols = allowPickers ? 2 : std::min(4, n);
+		const int rowsN = (n + cols - 1) / cols;
+		for (int i = 0; i < n; i++) {
+			auto *c = new Cell(i, allowPickers, scenesW);
 			connect(c, &Cell::sceneChosen, this, [](int idx, const std::string &name) {
 				g_model.scenes[idx] = name;
 				refreshAll();
 			});
 			connect(c, &Cell::cellClicked, this, &MultiviewGrid::onClick);
 			connect(c, &Cell::contextRequested, this, &MultiviewGrid::showMenu);
-			grid->addWidget(c, first + i / 2, i % 2);
+			sg->addWidget(c, i / cols, i % cols);
 			cells.push_back(c);
 		}
-		if (!allowPickers) {
-			grid->setRowStretch(0, 3);
-			for (int r = 0; r < rows; r++)
-				grid->setRowStretch(first + r, 1);
+		for (int k = 0; k < cols; k++)
+			sg->setColumnStretch(k, 1);
+		if (allowPickers) {
+			sg->setRowStretch(rowsN, 1); // spare height stays empty at the bottom
 		} else {
-			// Dock: every row keeps the canvas aspect ratio; spare height stays empty at the bottom.
-			grid->setRowStretch(first + rows, 1);
+			for (int r = 0; r < rowsN; r++)
+				sg->setRowStretch(r, 1);
 		}
-		grid->setColumnStretch(0, 1);
-		grid->setColumnStretch(1, 1);
+
+		if (allowPickers) {
+			scroll = new QScrollArea(this);
+			scroll->setWidgetResizable(true);
+			scroll->setFrameShape(QFrame::NoFrame);
+			scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+			scroll->setWidget(scenesW);
+			root->addWidget(topW, 0);
+			root->addWidget(scroll, 1);
+		} else {
+			scenesW->setParent(this);
+			root->addWidget(topW, 3);
+			root->addWidget(scenesW, rowsN);
+		}
 		refresh();
 	}
 
@@ -486,14 +520,30 @@ public:
 			pgm->update(prog);
 		for (size_t i = 0; i < cells.size(); i++) {
 			const std::string &a = g_model.scenes[i];
+			// Only offer scenes that are not already used in another cell.
+			std::vector<std::string> avail;
+			for (auto &nm : names) {
+				bool usedElsewhere = false;
+				if (nm != a)
+					for (size_t j = 0; j < cells.size(); j++)
+						if (j != i && g_model.scenes[j] == nm) {
+							usedElsewhere = true;
+							break;
+						}
+				if (!usedElsewhere)
+					avail.push_back(nm);
+			}
 			int tally = (!a.empty() && a == prog) ? 2 : (!a.empty() && a == prev) ? 1 : 0;
-			cells[i]->update(names, a, tally, allowPickers && g_model.edit);
+			cells[i]->update(avail, a, tally, allowPickers && g_model.edit);
 		}
 	}
 
 private:
 	bool allowPickers;
-	QGridLayout *grid;
+	QVBoxLayout *root;
+	QWidget *topW = nullptr;
+	QWidget *scenesW = nullptr;
+	QScrollArea *scroll = nullptr;
 	std::vector<Cell *> cells;
 	BusCell *pvw = nullptr;
 	BusCell *pgm = nullptr;
@@ -509,6 +559,11 @@ private:
 		bool studio = obs_frontend_preview_program_mode_active();
 		if (!dbl && !studio) {
 			g_model.previewScene = name;
+			refreshAll();
+			return;
+		}
+		if (dbl && !studio) {
+			cutToProgram(name);
 			refreshAll();
 			return;
 		}
@@ -596,13 +651,8 @@ public:
 		h->addWidget(win);
 		h->addStretch(1);
 		v->addLayout(h);
-		grid = new MultiviewGrid(true, nullptr);
-		auto *scroll = new QScrollArea(this);
-		scroll->setWidgetResizable(true);
-		scroll->setFrameShape(QFrame::NoFrame);
-		scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-		scroll->setWidget(grid);
-		v->addWidget(scroll, 1);
+		grid = new MultiviewGrid(true, this);
+		v->addWidget(grid, 1);
 
 		connect(countBox, &QComboBox::activated, this, [this](int i) {
 			g_model.rows = countBox->itemData(i).toInt();
