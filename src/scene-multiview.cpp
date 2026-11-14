@@ -8,6 +8,7 @@
 #include <graphics/graphics.h>
 
 #include <QAction>
+#include <QApplication>
 #include <QObject>
 #include <QCheckBox>
 #include <QComboBox>
@@ -602,7 +603,7 @@ static void eventCb(enum obs_frontend_event event, void *)
 {
 	if (event == OBS_FRONTEND_EVENT_EXIT) {
 		g_exiting = true;
-		for (QWidget *w : QGuiApplication::topLevelWidgets())
+		for (QWidget *w : QApplication::topLevelWidgets())
 			if (dynamic_cast<ProjectorWindow *>(w))
 				w->close();
 		obs_frontend_remove_dock(kDockId);
