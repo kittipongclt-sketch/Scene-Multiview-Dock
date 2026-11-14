@@ -21,6 +21,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QScreen>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
@@ -47,7 +48,7 @@ static const char *kDockId = "scene_multiview";
 
 // ---------------------------------------------------------------- model ----
 struct Model {
-	int rows = 4;                    // scene rows (2 columns each): 2, 4, 6 or 8
+	int rows = 4;                    // scene rows (2 columns each): 1..8
 	std::vector<std::string> scenes; // scene name per cell (size kMaxCells)
 	std::string previewScene;        // plugin-side Preview bus (used when Studio Mode is off)
 	bool edit = true;                // show scene pickers under each cell
@@ -97,14 +98,26 @@ static void fillDefaultsIfEmpty()
 class DisplayWidget : public QWidget {
 	Q_OBJECT
 public:
-	explicit DisplayWidget(QWidget *parent = nullptr) : QWidget(parent)
+	explicit DisplayWidget(bool autoAspect, QWidget *parent = nullptr) : QWidget(parent), aspect(autoAspect)
 	{
 		setAttribute(Qt::WA_PaintOnScreen);
 		setAttribute(Qt::WA_NativeWindow);
 		setAttribute(Qt::WA_DontCreateNativeAncestors);
 		setAttribute(Qt::WA_NoSystemBackground);
 		setMinimumSize(96, 54);
-		setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+		QSizePolicy sp(QSizePolicy::Expanding, aspect ? QSizePolicy::Preferred : QSizePolicy::Expanding);
+		sp.setHeightForWidth(aspect);
+		setSizePolicy(sp);
+	}
+
+	bool hasHeightForWidth() const override { return aspect; }
+	int heightForWidth(int w) const override
+	{
+		double r = 9.0 / 16.0;
+		obs_video_info ovi;
+		if (obs_get_video_info(&ovi) && ovi.base_width)
+			r = (double)ovi.base_height / (double)ovi.base_width;
+		return (int)(w * r);
 	}
 	~DisplayWidget() override
 	{
@@ -171,6 +184,7 @@ protected:
 	}
 
 private:
+	bool aspect;
 	obs_display_t *display = nullptr;
 	obs_weak_source_t *weak = nullptr;
 	std::string sceneName;
@@ -268,13 +282,13 @@ private:
 class Cell : public QFrame {
 	Q_OBJECT
 public:
-	Cell(int idx, QWidget *parent) : QFrame(parent), index(idx)
+	Cell(int idx, bool aspect, QWidget *parent) : QFrame(parent), index(idx)
 	{
 		setObjectName("svcell");
 		auto *l = new QVBoxLayout(this);
 		l->setContentsMargins(3, 3, 3, 3);
 		l->setSpacing(2);
-		disp = new DisplayWidget(this);
+		disp = new DisplayWidget(aspect, this);
 		combo = new QComboBox(this);
 		label = new QLabel(this);
 		label->setAlignment(Qt::AlignCenter);
@@ -337,14 +351,14 @@ private:
 class BusCell : public QFrame {
 	Q_OBJECT
 public:
-	BusCell(const QString &t, const QString &color, QWidget *parent) : QFrame(parent), title(t)
+	BusCell(const QString &t, const QString &color, bool aspect, QWidget *parent) : QFrame(parent), title(t)
 	{
 		setObjectName("bus");
 		setStyleSheet(QString("QFrame#bus{border:4px solid %1;background:#000;}").arg(color));
 		auto *l = new QVBoxLayout(this);
 		l->setContentsMargins(3, 3, 3, 3);
 		l->setSpacing(2);
-		disp = new DisplayWidget(this);
+		disp = new DisplayWidget(aspect, this);
 		label = new QLabel(this);
 		label->setAlignment(Qt::AlignCenter);
 		label->setStyleSheet(QString("color:%1;font-weight:bold;").arg(color));
@@ -418,8 +432,8 @@ public:
 			grid->setColumnStretch(i, 0);
 		}
 
-		pvw = new BusCell("PREVIEW", "#43a047", this);
-		pgm = new BusCell("PROGRAM", "#e53935", this);
+		pvw = new BusCell("PREVIEW", "#43a047", allowPickers, this);
+		pgm = new BusCell("PROGRAM", "#e53935", allowPickers, this);
 		connect(pvw, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
 		connect(pgm, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
 		grid->addWidget(pvw, 0, 0);
@@ -437,7 +451,7 @@ public:
 
 		const int rows = g_model.rows;
 		for (int i = 0; i < rows * 2; i++) {
-			auto *c = new Cell(i, this);
+			auto *c = new Cell(i, allowPickers, this);
 			connect(c, &Cell::sceneChosen, this, [](int idx, const std::string &name) {
 				g_model.scenes[idx] = name;
 				refreshAll();
@@ -447,9 +461,11 @@ public:
 			grid->addWidget(c, first + i / 2, i % 2);
 			cells.push_back(c);
 		}
-		grid->setRowStretch(0, 3);
-		for (int r = 0; r < rows; r++)
-			grid->setRowStretch(first + r, 1);
+		if (!allowPickers) {
+			grid->setRowStretch(0, 3);
+			for (int r = 0; r < rows; r++)
+				grid->setRowStretch(first + r, 1);
+		}
 		grid->setColumnStretch(0, 1);
 		grid->setColumnStretch(1, 1);
 		refresh();
@@ -568,8 +584,8 @@ public:
 		auto *h = new QHBoxLayout;
 		h->addWidget(new QLabel("Rows"));
 		countBox = new QComboBox;
-		for (int n : {2, 4, 6, 8})
-			countBox->addItem(QString("%1 rows (%2 scenes)").arg(n).arg(n * 2), n);
+		for (int n = 1; n <= 8; n++)
+			countBox->addItem(QString("%1 row%2 (%3 scenes)").arg(n).arg(n > 1 ? "s" : "").arg(n * 2), n);
 		h->addWidget(countBox);
 		editBox = new QCheckBox("Choose scenes");
 		h->addWidget(editBox);
@@ -577,8 +593,13 @@ public:
 		h->addWidget(win);
 		h->addStretch(1);
 		v->addLayout(h);
-		grid = new MultiviewGrid(true, this);
-		v->addWidget(grid, 1);
+		grid = new MultiviewGrid(true, nullptr);
+		auto *scroll = new QScrollArea(this);
+		scroll->setWidgetResizable(true);
+		scroll->setFrameShape(QFrame::NoFrame);
+		scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+		scroll->setWidget(grid);
+		v->addWidget(scroll, 1);
 
 		connect(countBox, &QComboBox::activated, this, [this](int i) {
 			g_model.rows = countBox->itemData(i).toInt();
@@ -645,7 +666,7 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 	obs_data_t *d = obs_data_get_obj(save_data, "scene_multiview");
 	if (d) {
 		int r = (int)obs_data_get_int(d, "rows");
-		if (r == 2 || r == 4 || r == 6 || r == 8)
+		if (r >= 1 && r <= 8)
 			g_model.rows = r;
 		g_model.previewScene = obs_data_get_string(d, "preview_scene");
 		if (obs_data_has_user_value(d, "edit"))
