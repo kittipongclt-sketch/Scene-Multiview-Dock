@@ -33,11 +33,6 @@
 
 OBS_DECLARE_MODULE()
 
-// Keeps AUTOMOC happy on platforms where the Windows-only classes are compiled out.
-class MocAnchor : public QObject {
-	Q_OBJECT
-};
-
 MODULE_EXPORT const char *obs_module_name(void)
 {
 	return "Scene Multiview Dock";
@@ -46,15 +41,6 @@ MODULE_EXPORT const char *obs_module_description(void)
 {
 	return "Dock with 2/4/6/8 selectable live scene previews";
 }
-
-#ifndef _WIN32
-// Non-Windows builds (macOS/Linux CI jobs) compile an empty module.
-bool obs_module_load(void)
-{
-	blog(LOG_WARNING, "[Scene Multiview] this version supports Windows only");
-	return true;
-}
-#else // ===================== Windows implementation =====================
 
 static constexpr int kMaxCells = 8;
 static const char *kDockId = "scene_multiview";
@@ -213,6 +199,7 @@ private:
 	{
 		if (display || !isVisible() || !windowHandle())
 			return;
+#ifdef _WIN32
 		QSize s = size() * devicePixelRatioF();
 		if (s.width() < 2 || s.height() < 2)
 			return;
@@ -225,6 +212,7 @@ private:
 		display = obs_display_create(&info, 0xFF000000);
 		if (display)
 			obs_display_add_draw_callback(display, drawCb, this);
+#endif
 	}
 
 	void destroyDisplay()
@@ -648,7 +636,5 @@ void obs_module_unload(void)
 	obs_frontend_remove_save_callback(saveCb, nullptr);
 	obs_frontend_remove_event_callback(eventCb, nullptr);
 }
-
-#endif // _WIN32
 
 #include "scene-multiview.moc"
