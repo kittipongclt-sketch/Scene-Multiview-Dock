@@ -465,6 +465,9 @@ public:
 			grid->setRowStretch(0, 3);
 			for (int r = 0; r < rows; r++)
 				grid->setRowStretch(first + r, 1);
+		} else {
+			// Dock: every row keeps the canvas aspect ratio; spare height stays empty at the bottom.
+			grid->setRowStretch(first + rows, 1);
 		}
 		grid->setColumnStretch(0, 1);
 		grid->setColumnStretch(1, 1);
@@ -688,10 +691,32 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 	rebuildAll();
 }
 
+// Keep scene names in the model in sync when a scene is renamed in OBS.
+static void renameCb(void *, calldata_t *cd)
+{
+	const char *n = calldata_string(cd, "new_name");
+	const char *p = calldata_string(cd, "prev_name");
+	if (!n || !p || g_exiting || !g_dock)
+		return;
+	std::string newName = n, prevName = p;
+	QMetaObject::invokeMethod(
+		g_dock,
+		[newName, prevName] {
+			for (auto &s : g_model.scenes)
+				if (s == prevName)
+					s = newName;
+			if (g_model.previewScene == prevName)
+				g_model.previewScene = newName;
+			refreshAll();
+		},
+		Qt::QueuedConnection);
+}
+
 static void eventCb(enum obs_frontend_event event, void *)
 {
 	if (event == OBS_FRONTEND_EVENT_EXIT) {
 		g_exiting = true;
+		signal_handler_disconnect(obs_get_signal_handler(), "source_rename", renameCb, nullptr);
 		for (QWidget *w : QApplication::topLevelWidgets())
 			if (dynamic_cast<ProjectorWindow *>(w))
 				w->close();
@@ -729,6 +754,7 @@ bool obs_module_load(void)
 	obs_frontend_add_dock_by_id(kDockId, "Scene Multiview", g_dock);
 	obs_frontend_add_save_callback(saveCb, nullptr);
 	obs_frontend_add_event_callback(eventCb, nullptr);
+	signal_handler_connect(obs_get_signal_handler(), "source_rename", renameCb, nullptr);
 	return true;
 }
 
@@ -736,6 +762,7 @@ void obs_module_unload(void)
 {
 	obs_frontend_remove_save_callback(saveCb, nullptr);
 	obs_frontend_remove_event_callback(eventCb, nullptr);
+	signal_handler_disconnect(obs_get_signal_handler(), "source_rename", renameCb, nullptr);
 }
 
 #include "scene-multiview.moc"
