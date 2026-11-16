@@ -112,6 +112,25 @@ jobs:
           config: ${{ needs.check-event.outputs.config }}
           package: ${{ fromJSON(needs.check-event.outputs.package) }}
 
+      - name: Build Installer 📦
+        run: |
+          choco install innosetup -y --no-progress
+          $zip = Get-ChildItem release -Filter "*-windows-x64.zip" | Select-Object -First 1
+          if ($null -eq $zip) { throw "plugin zip not found in release/" }
+          Expand-Archive -Path $zip.FullName -DestinationPath installer-stage -Force
+          $dll = Get-ChildItem installer-stage -Recurse -Filter "${{ steps.setup.outputs.pluginName }}.dll" | Select-Object -First 1
+          if ($null -eq $dll) { throw "plugin dll not found in package" }
+          $root = $dll.Directory.Parent.Parent.FullName
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=${{ steps.setup.outputs.pluginVersion }}" "/DStageDir=$root" "/O$((Resolve-Path release).Path)" installer\scene-multiview.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+
+      - name: Upload Installer 📦
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-installer
+          path: ${{ github.workspace }}/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-setup.exe
+
       - name: Upload Artifacts 📡
         uses: actions/upload-artifact@v4
         with:
