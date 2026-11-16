@@ -14,6 +14,7 @@
 #include <QDoubleSpinBox>
 #include <QInputDialog>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QTimer>
 #include <QToolButton>
 #include <cstring>
@@ -394,9 +395,14 @@ public:
 		l->setSpacing(2);
 		disp = new DisplayWidget(aspect, this);
 		combo = new QComboBox(this);
+		// Do not let long scene names widen the column (it must shrink with the dock).
+		combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+		combo->setMinimumContentsLength(1);
+		combo->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 		label = new QLabel(this);
 		label->setAlignment(Qt::AlignCenter);
 		label->setTextFormat(Qt::RichText);
+		label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 		l->addWidget(disp, 1);
 		l->addWidget(combo);
 		l->addWidget(label);
@@ -533,9 +539,26 @@ static void cutToProgram(const std::string &name)
 		g_model.previewScene = old;
 }
 
+// Ask before putting a scene that has no picture on air.
+static bool confirmOnAir(const std::string &name)
+{
+	if (!sceneNameNoSignal(name))
+		return true;
+	QWidget *parent = static_cast<QWidget *>(obs_frontend_get_main_window());
+	return QMessageBox::warning(
+		       parent, "Scene Multiview",
+		       QString::fromUtf8(
+			       "\u0E0B\u0E35\u0E19 \"%1\" \u0E44\u0E21\u0E48\u0E21\u0E35\u0E2A\u0E31\u0E0D\u0E0D\u0E32\u0E13 (\u0E01\u0E25\u0E49\u0E2D\u0E07\u0E2B\u0E25\u0E38\u0E14?)\n\u0E15\u0E49\u0E2D\u0E07\u0E01\u0E32\u0E23\u0E02\u0E36\u0E49\u0E19\u0E08\u0E2D\u0E15\u0E48\u0E2D\u0E2B\u0E23\u0E37\u0E2D\u0E44\u0E21\u0E48?")
+			       .arg(QString::fromStdString(name)),
+		       QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes;
+}
+
 // CUT / FADE buttons. In Studio Mode this fires OBS' own transition with the chosen type.
 static void takeToProgram(bool fade)
 {
+	bool studio = obs_frontend_preview_program_mode_active();
+	if (!confirmOnAir(studio ? currentName(true) : g_model.previewScene))
+		return;
 	useTransition(fade);
 	if (obs_frontend_preview_program_mode_active()) {
 		obs_frontend_preview_program_trigger_transition();
@@ -736,6 +759,8 @@ private:
 			refreshAll();
 			return;
 		}
+		if (dbl && !confirmOnAir(name))
+			return;
 		if (dbl && !studio) {
 			useTransition(false);
 			cutToProgram(name);
