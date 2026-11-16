@@ -121,8 +121,13 @@ jobs:
           $dll = Get-ChildItem installer-stage -Recurse -Filter "${{ steps.setup.outputs.pluginName }}.dll" | Select-Object -First 1
           if ($null -eq $dll) { throw "plugin dll not found in package" }
           $root = $dll.Directory.Parent.Parent.FullName
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          & $iscc "/DAppVersion=${{ steps.setup.outputs.pluginVersion }}" "/DStageDir=$root" "/O$((Resolve-Path release).Path)" installer\scene-multiview.iss
+          Get-ChildItem installer-stage -Recurse | ForEach-Object { $_.FullName }
+          Write-Host "StageDir root: $root (exists: $(Test-Path $root))"
+          $iscc = Get-ChildItem -Path "${env:ProgramFiles(x86)}","$env:ProgramFiles","$env:LOCALAPPDATA\Programs" -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          Write-Host "ISCC: $iscc"
+          $iss = (Resolve-Path installer\scene-multiview.iss).Path
+          $out = (Resolve-Path release).Path
+          & $iscc "/DAppVersion=${{ steps.setup.outputs.pluginVersion }}" "/DStageDir=$root" "/O$out" $iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
       - name: Upload Installer 📦
