@@ -1,59 +1,27 @@
-# OBS Plugin Template
+# Scene Multiview Dock (ปลั๊กอิน OBS)
 
-## Introduction
+Dock แสดงพรีวิวหลายซีนใน OBS แบบ Multiview พร้อมแถว **PREVIEW / PROGRAM** ด้านบน ใช้งานได้โดยไม่ต้องเปิด Studio Mode
+รองรับ OBS 31+ (ทดสอบบน 33.0.1) เฉพาะ Windows 64 บิต
 
-The plugin template is meant to be used as a starting point for OBS Studio plugin development. It includes:
+## ติดตั้ง
+1. ดาวน์โหลด `scene-multiview-X.Y.Z-setup.exe` จากหน้า [Releases](../../releases/latest)
+2. **ปิด OBS ก่อน** แล้วรันตัวติดตั้ง (ติดตั้งที่ `C:\ProgramData\obs-studio\plugins\scene-multiview`)
+3. เปิด OBS > เมนู **Docks** > **Scene Multiview**
 
-* Boilerplate plugin source code
-* A CMake project file
-* GitHub Actions workflows and repository actions
+ติดตั้งเอง: คัดลอกโฟลเดอร์ `bin` และ `data` จากไฟล์ zip ไปไว้ที่
+`C:\ProgramData\obs-studio\plugins\scene-multiview\` (ไม่ใช่ `C:\Program Files\obs-studio\plugins`)
 
-## Supported Build Environments
+> Chrome อาจบล็อกไฟล์ที่ไม่มีลายเซ็น ให้กด Keep หรือโหลดด้วย Edge
 
-| Platform  | Tool   |
-|-----------|--------|
-| Windows   | Visual Studio 17 2022 |
-| macOS     | XCode 16.0 |
-| Windows, macOS  | CMake 3.30.5 |
-| Ubuntu 24.04 | CMake 3.28.3 |
-| Ubuntu 24.04 | `ninja-build` |
-| Ubuntu 24.04 | `pkg-config`
-| Ubuntu 24.04 | `build-essential` |
+## วิธีใช้
+- **คลิกซีน** = ส่งไป Preview, **ดับเบิลคลิก** = ขึ้น Program ทันที (CUT)
+- **CUT** / **FADE** (ตั้งเวลา FADE ได้ในช่องข้างปุ่ม) ส่ง Preview ขึ้น Program แล้ว Preview จะสลับเป็นซีนเดิมของ Program
+- **Rows** 1–8 และ **Columns** 2–4 ปรับจำนวนและการเรียงซีน, ติ๊ก **Choose scenes** เพื่อเลือกซีนในแต่ละช่อง (ซีนที่เลือกแล้วจะไม่แสดงซ้ำ)
+- ซีนที่มีแหล่งภาพไม่มีสัญญาณ (เช่น กล้องหลุด) จะขึ้น **⚠ ไม่มีสัญญาณ** สีส้มที่ชื่อซีน (เตือนอย่างเดียว ไม่บล็อก)
+- **Layout / Presets**: บันทึกชุดซีนเป็นพรีเซ็ต เช่น "ประชุมใหญ่" "อบรม" สลับได้ในคลิกเดียว เปลี่ยนชื่อ/อัปเดต/ลบได้ในเมนู Presets
+- **Window** หรือคลิกขวา: เปิดหน้าต่าง Multiview (F11 เต็มจอ, Esc ปิด) แสดงซีนแถวละ 4
+- ค่าทั้งหมดบันทึกไปกับ Scene Collection และเปลี่ยนชื่อซีนใน OBS แล้วชื่อตามอัตโนมัติ
 
-## Quick Start
-
-An absolute bare-bones [Quick Start Guide](https://github.com/obsproject/obs-plugintemplate/wiki/Quick-Start-Guide) is available in the wiki.
-
-## Documentation
-
-All documentation can be found in the [Plugin Template Wiki](https://github.com/obsproject/obs-plugintemplate/wiki).
-
-Suggested reading to get up and running:
-
-* [Getting started](https://github.com/obsproject/obs-plugintemplate/wiki/Getting-Started)
-* [Build system requirements](https://github.com/obsproject/obs-plugintemplate/wiki/Build-System-Requirements)
-* [Build system options](https://github.com/obsproject/obs-plugintemplate/wiki/CMake-Build-System-Options)
-
-## GitHub Actions & CI
-
-Default GitHub Actions workflows are available for the following repository actions:
-
-* `push`: Run for commits or tags pushed to `master` or `main` branches.
-* `pr-pull`: Run when a Pull Request has been pushed or synchronized.
-* `dispatch`: Run when triggered by the workflow dispatch in GitHub's user interface.
-* `build-project`: Builds the actual project and is triggered by other workflows.
-* `check-format`: Checks CMake and plugin source code formatting and is triggered by other workflows.
-
-The workflows make use of GitHub repository actions (contained in `.github/actions`) and build scripts (contained in `.github/scripts`) which are not needed for local development, but might need to be adjusted if additional/different steps are required to build the plugin.
-
-### Retrieving build artifacts
-
-Successful builds on GitHub Actions will produce build artifacts that can be downloaded for testing. These artifacts are commonly simple archives and will not contain package installers or installation programs.
-
-### Building a Release
-
-To create a release, an appropriately named tag needs to be pushed to the `main`/`master` branch using semantic versioning (e.g., `12.3.4`, `23.4.5-beta2`). A draft release will be created on the associated repository with generated installer packages or installation programs attached as release artifacts.
-
-## Signing and Notarizing on macOS
-
-Basic concepts of codesigning and notarization on macOS are explained in the correspodning [Wiki article](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS) which has a specific section for the [GitHub Actions setup](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS#setting-up-code-signing-for-github-actions).
+## ออก Release ใหม่ (ผู้ดูแล)
+แก้ `version` ใน `buildspec.json` แล้ว push แท็กเลขล้วน เช่น
+`git tag 1.1.0 && git push origin 1.1.0` — GitHub Actions จะสร้าง Release พร้อม setup.exe ให้อัตโนมัติ
