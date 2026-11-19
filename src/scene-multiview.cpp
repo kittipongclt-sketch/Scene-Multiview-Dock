@@ -67,6 +67,8 @@ struct Model {
 	std::vector<std::string> scenes; // scene name per cell (size kMaxCells)
 	std::string previewScene;        // plugin-side Preview bus (used when Studio Mode is off)
 	bool edit = true;                // show scene pickers under each cell
+	bool showPvw = true;             // show the PREVIEW box in the dock
+	bool showPgm = true;             // show the PROGRAM box in the dock
 	int fadeMs = 500;                // duration used by the FADE button
 	std::vector<Preset> presets;     // saved layouts
 	int activePreset = -1;
@@ -613,12 +615,24 @@ public:
 		auto *tg = new QGridLayout(topW);
 		tg->setContentsMargins(0, 0, 0, 0);
 		tg->setSpacing(4);
-		pvw = new BusCell("PREVIEW", "#43a047", allowPickers, topW);
-		pgm = new BusCell("PROGRAM", "#e53935", allowPickers, topW);
-		connect(pvw, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
-		connect(pgm, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
-		tg->addWidget(pvw, 0, 0);
-		tg->addWidget(pgm, 0, 1);
+		const bool wantPvw = !allowPickers || g_model.showPvw;
+		const bool wantPgm = !allowPickers || g_model.showPgm;
+		if (wantPvw) {
+			pvw = new BusCell("PREVIEW", "#43a047", allowPickers, topW);
+			connect(pvw, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
+		}
+		if (wantPgm) {
+			pgm = new BusCell("PROGRAM", "#e53935", allowPickers, topW);
+			connect(pgm, &BusCell::contextRequested, this, &MultiviewGrid::showMenu);
+		}
+		if (pvw && pgm) {
+			tg->addWidget(pvw, 0, 0);
+			tg->addWidget(pgm, 0, 1);
+		} else if (pvw) {
+			tg->addWidget(pvw, 0, 0, 1, 2);
+		} else if (pgm) {
+			tg->addWidget(pgm, 0, 0, 1, 2);
+		}
 		tg->setColumnStretch(0, 1);
 		tg->setColumnStretch(1, 1);
 		if (allowPickers) {
@@ -875,6 +889,12 @@ public:
 		h2->addWidget(colsBox);
 		editBox = new QCheckBox("Choose scenes");
 		h2->addWidget(editBox);
+		showPvwBox = new QCheckBox("PVW");
+		showPgmBox = new QCheckBox("PGM");
+		showPvwBox->setToolTip("Show / hide the PREVIEW box");
+		showPgmBox->setToolTip("Show / hide the PROGRAM box");
+		h2->addWidget(showPvwBox);
+		h2->addWidget(showPgmBox);
 		auto *win = new QPushButton("Window");
 		h2->addWidget(win);
 		h2->addStretch(1);
@@ -902,13 +922,23 @@ public:
 			g_model.edit = on;
 			refreshAll();
 		});
+		connect(showPvwBox, &QCheckBox::toggled, this, [](bool on) {
+			g_model.showPvw = on;
+			rebuildAll();
+		});
+		connect(showPgmBox, &QCheckBox::toggled, this, [](bool on) {
+			g_model.showPgm = on;
+			rebuildAll();
+		});
 		connect(win, &QPushButton::clicked, this, [] { openProjector(nullptr); });
 		syncFromModel();
 	}
 
 	void syncFromModel()
 	{
-		QSignalBlocker a(rowsBox), b(editBox), c(colsBox), d(presetBox);
+		QSignalBlocker a(rowsBox), b(editBox), c(colsBox), d(presetBox), e(showPvwBox), f(showPgmBox);
+		showPvwBox->setChecked(g_model.showPvw);
+		showPgmBox->setChecked(g_model.showPgm);
 		rowsBox->setCurrentIndex(std::max(0, rowsBox->findData(g_model.rows)));
 		colsBox->setCurrentIndex(std::max(0, colsBox->findData(g_model.cols)));
 		editBox->setChecked(g_model.edit);
@@ -921,7 +951,7 @@ public:
 
 private:
 	QComboBox *presetBox, *rowsBox, *colsBox;
-	QCheckBox *editBox;
+	QCheckBox *editBox, *showPvwBox, *showPgmBox;
 	MultiviewGrid *grid;
 
 	void applyPreset(int idx)
@@ -1019,6 +1049,8 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 		obs_data_set_int(d, "active_preset", g_model.activePreset);
 		obs_data_set_string(d, "preview_scene", g_model.previewScene.c_str());
 		obs_data_set_bool(d, "edit", g_model.edit);
+		obs_data_set_bool(d, "show_pvw", g_model.showPvw);
+		obs_data_set_bool(d, "show_pgm", g_model.showPgm);
 		auto scenesToArray = [](const std::vector<std::string> &v) {
 			obs_data_array_t *arr = obs_data_array_create();
 			for (auto &s : v) {
@@ -1077,6 +1109,10 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 		if (fm >= 100 && fm <= 10000)
 			g_model.fadeMs = fm;
 		g_model.previewScene = obs_data_get_string(d, "preview_scene");
+		if (obs_data_has_user_value(d, "show_pvw"))
+			g_model.showPvw = obs_data_get_bool(d, "show_pvw");
+		if (obs_data_has_user_value(d, "show_pgm"))
+			g_model.showPgm = obs_data_get_bool(d, "show_pgm");
 		if (obs_data_has_user_value(d, "edit"))
 			g_model.edit = obs_data_get_bool(d, "edit");
 		obs_data_array_t *arr = obs_data_get_array(d, "cells");
