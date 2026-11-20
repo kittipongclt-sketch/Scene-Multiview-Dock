@@ -67,6 +67,7 @@ struct Model {
 	std::vector<std::string> scenes; // scene name per cell (size kMaxCells)
 	std::string previewScene;        // plugin-side Preview bus (used when Studio Mode is off)
 	bool edit = true;                // show scene pickers under each cell
+	bool showSettings = false;       // settings panel expanded
 	bool showPvw = true;             // show the PREVIEW box in the dock
 	bool showPgm = true;             // show the PROGRAM box in the dock
 	int fadeMs = 500;                // duration used by the FADE button
@@ -856,27 +857,39 @@ public:
 		auto *v = new QVBoxLayout(this);
 		v->setContentsMargins(4, 4, 4, 4);
 
-		// line 1: layout presets
+		// slim top row: preset switcher + gear that shows / hides the settings panel
 		auto *h1 = new QHBoxLayout;
 		h1->addWidget(new QLabel("Layout"));
 		presetBox = new QComboBox;
-		presetBox->setMinimumContentsLength(14);
+		presetBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+		presetBox->setMinimumContentsLength(8);
+		presetBox->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 		h1->addWidget(presetBox, 1);
-		auto *menuBtn = new QToolButton;
-		menuBtn->setText("Presets ▾");
-		menuBtn->setPopupMode(QToolButton::InstantPopup);
-		auto *menu = new QMenu(menuBtn);
-		connect(menu->addAction("Save current as new…"), &QAction::triggered, this, [this] { savePreset(); });
-		connect(menu->addAction("Update selected preset"), &QAction::triggered, this,
-			[this] { updatePreset(); });
-		connect(menu->addAction("Rename…"), &QAction::triggered, this, [this] { renamePreset(); });
-		connect(menu->addAction("Delete"), &QAction::triggered, this, [this] { deletePreset(); });
-		menuBtn->setMenu(menu);
-		h1->addWidget(menuBtn);
+		gearBtn = new QToolButton;
+		gearBtn->setText("\u2699");
+		gearBtn->setCheckable(true);
+		gearBtn->setToolTip("Settings");
+		h1->addWidget(gearBtn);
 		v->addLayout(h1);
 
-		// line 2: rows / columns / options
+		// collapsible settings panel
+		panel = new QWidget;
+		auto *pv = new QVBoxLayout(panel);
+		pv->setContentsMargins(0, 0, 0, 0);
+		pv->setSpacing(2);
 		auto *h2 = new QHBoxLayout;
+		auto *menuBtn = new QToolButton;
+		menuBtn->setText("Presets \u25BE");
+		menuBtn->setPopupMode(QToolButton::InstantPopup);
+		auto *menu = new QMenu(menuBtn);
+		connect(menu->addAction("Save current as new\u2026"), &QAction::triggered, this,
+			[this] { savePreset(); });
+		connect(menu->addAction("Update selected preset"), &QAction::triggered, this,
+			[this] { updatePreset(); });
+		connect(menu->addAction("Rename\u2026"), &QAction::triggered, this, [this] { renamePreset(); });
+		connect(menu->addAction("Delete"), &QAction::triggered, this, [this] { deletePreset(); });
+		menuBtn->setMenu(menu);
+		h2->addWidget(menuBtn);
 		h2->addWidget(new QLabel("Rows"));
 		rowsBox = new QComboBox;
 		for (int n = 1; n <= 8; n++)
@@ -887,22 +900,30 @@ public:
 		for (int n = 2; n <= 4; n++)
 			colsBox->addItem(QString::number(n), n);
 		h2->addWidget(colsBox);
+		h2->addStretch(1);
+		pv->addLayout(h2);
+		auto *h3 = new QHBoxLayout;
 		editBox = new QCheckBox("Choose scenes");
-		h2->addWidget(editBox);
+		h3->addWidget(editBox);
 		showPvwBox = new QCheckBox("PVW");
 		showPgmBox = new QCheckBox("PGM");
 		showPvwBox->setToolTip("Show / hide the PREVIEW box");
 		showPgmBox->setToolTip("Show / hide the PROGRAM box");
-		h2->addWidget(showPvwBox);
-		h2->addWidget(showPgmBox);
+		h3->addWidget(showPvwBox);
+		h3->addWidget(showPgmBox);
 		auto *win = new QPushButton("Window");
-		h2->addWidget(win);
-		h2->addStretch(1);
-		v->addLayout(h2);
+		h3->addWidget(win);
+		h3->addStretch(1);
+		pv->addLayout(h3);
+		v->addWidget(panel);
 
 		grid = new MultiviewGrid(true, this);
 		v->addWidget(grid, 1);
 
+		connect(gearBtn, &QToolButton::toggled, this, [this](bool on) {
+			g_model.showSettings = on;
+			panel->setVisible(on);
+		});
 		connect(presetBox, &QComboBox::activated, this, [this](int i) {
 			int idx = presetBox->itemData(i).toInt();
 			if (idx >= 0 && idx < (int)g_model.presets.size())
@@ -936,7 +957,10 @@ public:
 
 	void syncFromModel()
 	{
-		QSignalBlocker a(rowsBox), b(editBox), c(colsBox), d(presetBox), e(showPvwBox), f(showPgmBox);
+		QSignalBlocker a(rowsBox), b(editBox), c(colsBox), d(presetBox), e(showPvwBox), f(showPgmBox),
+			g(gearBtn);
+		gearBtn->setChecked(g_model.showSettings);
+		panel->setVisible(g_model.showSettings);
 		showPvwBox->setChecked(g_model.showPvw);
 		showPgmBox->setChecked(g_model.showPgm);
 		rowsBox->setCurrentIndex(std::max(0, rowsBox->findData(g_model.rows)));
@@ -952,6 +976,8 @@ public:
 private:
 	QComboBox *presetBox, *rowsBox, *colsBox;
 	QCheckBox *editBox, *showPvwBox, *showPgmBox;
+	QToolButton *gearBtn;
+	QWidget *panel;
 	MultiviewGrid *grid;
 
 	void applyPreset(int idx)
@@ -1049,6 +1075,7 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 		obs_data_set_int(d, "active_preset", g_model.activePreset);
 		obs_data_set_string(d, "preview_scene", g_model.previewScene.c_str());
 		obs_data_set_bool(d, "edit", g_model.edit);
+		obs_data_set_bool(d, "show_settings", g_model.showSettings);
 		obs_data_set_bool(d, "show_pvw", g_model.showPvw);
 		obs_data_set_bool(d, "show_pgm", g_model.showPgm);
 		auto scenesToArray = [](const std::vector<std::string> &v) {
@@ -1109,6 +1136,8 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 		if (fm >= 100 && fm <= 10000)
 			g_model.fadeMs = fm;
 		g_model.previewScene = obs_data_get_string(d, "preview_scene");
+		if (obs_data_has_user_value(d, "show_settings"))
+			g_model.showSettings = obs_data_get_bool(d, "show_settings");
 		if (obs_data_has_user_value(d, "show_pvw"))
 			g_model.showPvw = obs_data_get_bool(d, "show_pvw");
 		if (obs_data_has_user_value(d, "show_pgm"))
