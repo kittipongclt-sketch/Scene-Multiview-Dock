@@ -596,8 +596,18 @@ public:
 	}
 	~MultiviewGrid() override { g_grids.erase(std::remove(g_grids.begin(), g_grids.end(), this), g_grids.end()); }
 
+	void setGear(QWidget *g)
+	{
+		gear = g;
+		rebuild();
+	}
+
 	void rebuild()
 	{
+		if (gear) {
+			gear->hide();
+			gear->setParent(this); // keep it alive while the top row is rebuilt
+		}
 		cells.clear();
 		pvw = pgm = nullptr;
 		delete topW;
@@ -662,6 +672,10 @@ public:
 				[](double v) { g_model.fadeMs = (int)(v * 1000.0 + 0.5); });
 			fl->addWidget(fadeBtn, 1);
 			fl->addWidget(spin);
+			if (gear) {
+				fl->addWidget(gear);
+				gear->show();
+			}
 			tg->addWidget(fadeRow, 1, 1);
 		} else {
 			tg->setRowStretch(0, 1);
@@ -743,6 +757,7 @@ public:
 
 private:
 	bool allowPickers;
+	QWidget *gear = nullptr;
 	QVBoxLayout *root;
 	QWidget *topW = nullptr;
 	QWidget *scenesW = nullptr;
@@ -858,25 +873,24 @@ public:
 		v->setContentsMargins(4, 4, 4, 4);
 
 		// slim top row: preset switcher + gear that shows / hides the settings panel
-		auto *h1 = new QHBoxLayout;
-		h1->addWidget(new QLabel("Layout"));
 		presetBox = new QComboBox;
 		presetBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
 		presetBox->setMinimumContentsLength(8);
 		presetBox->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-		h1->addWidget(presetBox, 1);
-		gearBtn = new QToolButton;
+		gearBtn = new QToolButton(this);
 		gearBtn->setText("\u2699");
 		gearBtn->setCheckable(true);
 		gearBtn->setToolTip("Settings");
-		h1->addWidget(gearBtn);
-		v->addLayout(h1);
 
 		// collapsible settings panel
 		panel = new QWidget;
 		auto *pv = new QVBoxLayout(panel);
 		pv->setContentsMargins(0, 0, 0, 0);
 		pv->setSpacing(2);
+		auto *h1 = new QHBoxLayout;
+		h1->addWidget(new QLabel("Layout"));
+		h1->addWidget(presetBox, 1);
+		pv->addLayout(h1);
 		auto *h2 = new QHBoxLayout;
 		auto *menuBtn = new QToolButton;
 		menuBtn->setText("Presets \u25BE");
@@ -918,6 +932,7 @@ public:
 		v->addWidget(panel);
 
 		grid = new MultiviewGrid(true, this);
+		grid->setGear(gearBtn); // the gear sits in the CUT / FADE row
 		v->addWidget(grid, 1);
 
 		connect(gearBtn, &QToolButton::toggled, this, [this](bool on) {
