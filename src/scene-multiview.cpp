@@ -35,6 +35,7 @@
 #include <QWidget>
 
 #include <algorithm>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -596,18 +597,15 @@ public:
 	}
 	~MultiviewGrid() override { g_grids.erase(std::remove(g_grids.begin(), g_grids.end(), this), g_grids.end()); }
 
-	void setGear(QWidget *g)
+	// Adds a gear toggle (settings panel) to the CUT / FADE row; cb gets the new state.
+	void setGear(std::function<void(bool)> cb)
 	{
-		gear = g;
+		gearCb = std::move(cb);
 		rebuild();
 	}
 
 	void rebuild()
 	{
-		if (gear) {
-			gear->hide();
-			gear->setParent(this); // keep it alive while the top row is rebuilt
-		}
 		cells.clear();
 		pvw = pgm = nullptr;
 		delete topW;
@@ -672,9 +670,15 @@ public:
 				[](double v) { g_model.fadeMs = (int)(v * 1000.0 + 0.5); });
 			fl->addWidget(fadeBtn, 1);
 			fl->addWidget(spin);
-			if (gear) {
+			if (gearCb) {
+				auto *gear = new QToolButton(fadeRow);
+				gear->setText("\u2699");
+				gear->setCheckable(true);
+				gear->setChecked(g_model.showSettings);
+				gear->setToolTip("Settings");
+				gear->setMinimumHeight(34);
+				connect(gear, &QToolButton::toggled, this, [this](bool on) { gearCb(on); });
 				fl->addWidget(gear);
-				gear->show();
 			}
 			tg->addWidget(fadeRow, 1, 1);
 		} else {
@@ -757,7 +761,7 @@ public:
 
 private:
 	bool allowPickers;
-	QWidget *gear = nullptr;
+	std::function<void(bool)> gearCb;
 	QVBoxLayout *root;
 	QWidget *topW = nullptr;
 	QWidget *scenesW = nullptr;
@@ -877,10 +881,6 @@ public:
 		presetBox->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
 		presetBox->setMinimumContentsLength(8);
 		presetBox->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-		gearBtn = new QToolButton(this);
-		gearBtn->setText("\u2699");
-		gearBtn->setCheckable(true);
-		gearBtn->setToolTip("Settings");
 
 		// collapsible settings panel
 		panel = new QWidget;
@@ -893,7 +893,7 @@ public:
 		pv->addLayout(h1);
 		auto *h2 = new QHBoxLayout;
 		auto *menuBtn = new QToolButton;
-		menuBtn->setText("Presets \u25BE");
+		menuBtn->setText("Presets");
 		menuBtn->setPopupMode(QToolButton::InstantPopup);
 		auto *menu = new QMenu(menuBtn);
 		connect(menu->addAction("Save current as new\u2026"), &QAction::triggered, this,
@@ -932,13 +932,12 @@ public:
 		v->addWidget(panel);
 
 		grid = new MultiviewGrid(true, this);
-		grid->setGear(gearBtn); // the gear sits in the CUT / FADE row
-		v->addWidget(grid, 1);
-
-		connect(gearBtn, &QToolButton::toggled, this, [this](bool on) {
+		grid->setGear([this](bool on) { // the gear sits in the CUT / FADE row
 			g_model.showSettings = on;
 			panel->setVisible(on);
 		});
+		v->addWidget(grid, 1);
+
 		connect(presetBox, &QComboBox::activated, this, [this](int i) {
 			int idx = presetBox->itemData(i).toInt();
 			if (idx >= 0 && idx < (int)g_model.presets.size())
@@ -972,9 +971,7 @@ public:
 
 	void syncFromModel()
 	{
-		QSignalBlocker a(rowsBox), b(editBox), c(colsBox), d(presetBox), e(showPvwBox), f(showPgmBox),
-			g(gearBtn);
-		gearBtn->setChecked(g_model.showSettings);
+		QSignalBlocker a(rowsBox), b(editBox), c(colsBox), d(presetBox), e(showPvwBox), f(showPgmBox);
 		panel->setVisible(g_model.showSettings);
 		showPvwBox->setChecked(g_model.showPvw);
 		showPgmBox->setChecked(g_model.showPgm);
@@ -991,7 +988,6 @@ public:
 private:
 	QComboBox *presetBox, *rowsBox, *colsBox;
 	QCheckBox *editBox, *showPvwBox, *showPgmBox;
-	QToolButton *gearBtn;
 	QWidget *panel;
 	MultiviewGrid *grid;
 
