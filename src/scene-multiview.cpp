@@ -895,6 +895,8 @@ public:
 		auto *menuBtn = new QToolButton;
 		menuBtn->setText("Presets");
 		menuBtn->setPopupMode(QToolButton::InstantPopup);
+		menuBtn->setStyleSheet("QToolButton{padding-right:20px;} QToolButton::menu-indicator{"
+				       "subcontrol-origin:padding;subcontrol-position:center right;right:6px;}");
 		auto *menu = new QMenu(menuBtn);
 		connect(menu->addAction("Save current as new\u2026"), &QAction::triggered, this,
 			[this] { savePreset(); });
@@ -903,7 +905,7 @@ public:
 		connect(menu->addAction("Rename\u2026"), &QAction::triggered, this, [this] { renamePreset(); });
 		connect(menu->addAction("Delete"), &QAction::triggered, this, [this] { deletePreset(); });
 		menuBtn->setMenu(menu);
-		h2->addWidget(menuBtn);
+		h1->addWidget(menuBtn);
 		h2->addWidget(new QLabel("Rows"));
 		rowsBox = new QComboBox;
 		for (int n = 1; n <= 8; n++)
@@ -915,6 +917,8 @@ public:
 			colsBox->addItem(QString::number(n), n);
 		h2->addWidget(colsBox);
 		h2->addStretch(1);
+		auto *win = new QPushButton("Window");
+		h2->addWidget(win);
 		pv->addLayout(h2);
 		auto *h3 = new QHBoxLayout;
 		editBox = new QCheckBox("Choose scenes");
@@ -925,8 +929,6 @@ public:
 		showPgmBox->setToolTip("Show / hide the PROGRAM box");
 		h3->addWidget(showPvwBox);
 		h3->addWidget(showPgmBox);
-		auto *win = new QPushButton("Window");
-		h3->addWidget(win);
 		h3->addStretch(1);
 		pv->addLayout(h3);
 		v->addWidget(panel);
