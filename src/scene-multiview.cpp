@@ -69,6 +69,7 @@ struct Model {
 	std::string previewScene;        // plugin-side Preview bus (used when Studio Mode is off)
 	bool edit = true;                // show scene pickers under each cell
 	bool showSettings = false;       // settings panel expanded
+	bool confirmNoSignal = false;    // ask before sending a no-signal scene to air
 	bool showPvw = true;             // show the PREVIEW box in the dock
 	bool showPgm = true;             // show the PROGRAM box in the dock
 	int fadeMs = 500;                // duration used by the FADE button
@@ -546,7 +547,7 @@ static void cutToProgram(const std::string &name)
 // Ask before putting a scene that has no picture on air.
 static bool confirmOnAir(const std::string &name)
 {
-	if (!sceneNameNoSignal(name))
+	if (!g_model.confirmNoSignal || !sceneNameNoSignal(name))
 		return true;
 	QWidget *parent = static_cast<QWidget *>(obs_frontend_get_main_window());
 	return QMessageBox::warning(
@@ -933,6 +934,9 @@ public:
 		showPgmBox->setToolTip("Show / hide the PROGRAM box");
 		h3->addWidget(showPvwBox);
 		h3->addWidget(showPgmBox);
+		confirmBox = new QCheckBox("Confirm no-signal");
+		confirmBox->setToolTip("Ask before sending a scene with no signal to Program");
+		h3->addWidget(confirmBox);
 		h3->addStretch(1);
 		pv->addLayout(h3);
 		v->addWidget(panel);
@@ -963,6 +967,7 @@ public:
 			g_model.edit = on;
 			refreshAll();
 		});
+		connect(confirmBox, &QCheckBox::toggled, this, [](bool on) { g_model.confirmNoSignal = on; });
 		connect(showPvwBox, &QCheckBox::toggled, this, [](bool on) {
 			g_model.showPvw = on;
 			rebuildAll();
@@ -977,7 +982,9 @@ public:
 
 	void syncFromModel()
 	{
-		QSignalBlocker a(rowsBox), b(editBox), c(colsBox), d(presetBox), e(showPvwBox), f(showPgmBox);
+		QSignalBlocker a(rowsBox), b(editBox), c(colsBox), d(presetBox), e(showPvwBox), f(showPgmBox),
+			g(confirmBox);
+		confirmBox->setChecked(g_model.confirmNoSignal);
 		panel->setVisible(g_model.showSettings);
 		showPvwBox->setChecked(g_model.showPvw);
 		showPgmBox->setChecked(g_model.showPgm);
@@ -993,7 +1000,7 @@ public:
 
 private:
 	QComboBox *presetBox, *rowsBox, *colsBox;
-	QCheckBox *editBox, *showPvwBox, *showPgmBox;
+	QCheckBox *editBox, *showPvwBox, *showPgmBox, *confirmBox;
 	QWidget *panel;
 	MultiviewGrid *grid;
 
@@ -1093,6 +1100,7 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 		obs_data_set_string(d, "preview_scene", g_model.previewScene.c_str());
 		obs_data_set_bool(d, "edit", g_model.edit);
 		obs_data_set_bool(d, "show_settings", g_model.showSettings);
+		obs_data_set_bool(d, "confirm_no_signal", g_model.confirmNoSignal);
 		obs_data_set_bool(d, "show_pvw", g_model.showPvw);
 		obs_data_set_bool(d, "show_pgm", g_model.showPgm);
 		auto scenesToArray = [](const std::vector<std::string> &v) {
@@ -1155,6 +1163,7 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 		g_model.previewScene = obs_data_get_string(d, "preview_scene");
 		if (obs_data_has_user_value(d, "show_settings"))
 			g_model.showSettings = obs_data_get_bool(d, "show_settings");
+		g_model.confirmNoSignal = obs_data_get_bool(d, "confirm_no_signal");
 		if (obs_data_has_user_value(d, "show_pvw"))
 			g_model.showPvw = obs_data_get_bool(d, "show_pvw");
 		if (obs_data_has_user_value(d, "show_pgm"))
