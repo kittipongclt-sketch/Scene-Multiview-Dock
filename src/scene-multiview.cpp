@@ -52,7 +52,7 @@ MODULE_EXPORT const char *obs_module_description(void)
 	return "Dock with 2/4/6/8 selectable live scene previews";
 }
 
-static constexpr int kMaxCells = 32; // up to 8 rows x 4 columns
+static constexpr int kMaxCells = 48; // up to 8 rows x 6 columns
 static const char *kDockId = "scene_multiview";
 
 // ---------------------------------------------------------------- model ----
@@ -925,7 +925,7 @@ public:
 		h2->addWidget(rowsBox);
 		h2->addWidget(new QLabel("Columns"));
 		colsBox = new QComboBox;
-		for (int n = 2; n <= 4; n++)
+		for (int n = 1; n <= 6; n++)
 			colsBox->addItem(QString::number(n), n);
 		h2->addWidget(colsBox);
 		h2->addStretch(1);
@@ -1162,7 +1162,7 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 		if (r >= 1 && r <= 8)
 			g_model.rows = r;
 		int c = (int)obs_data_get_int(d, "cols");
-		if (c >= 2 && c <= 4)
+		if (c >= 1 && c <= 6)
 			g_model.cols = c;
 		int fm = (int)obs_data_get_int(d, "fade_ms");
 		if (fm >= 100 && fm <= 10000)
@@ -1189,7 +1189,7 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 				Preset p;
 				p.name = obs_data_get_string(po, "name");
 				p.rows = std::clamp((int)obs_data_get_int(po, "rows"), 1, 8);
-				p.cols = std::clamp((int)obs_data_get_int(po, "cols"), 2, 4);
+				p.cols = std::clamp((int)obs_data_get_int(po, "cols"), 1, 6);
 				obs_data_array_t *pa = obs_data_get_array(po, "cells");
 				p.scenes = arrayToScenes(pa);
 				if (pa)
