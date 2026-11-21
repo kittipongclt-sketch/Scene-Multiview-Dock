@@ -12,6 +12,7 @@
 #include <QObject>
 #include <QAbstractSpinBox>
 #include <QCheckBox>
+#include <QDateTime>
 #include <QDoubleSpinBox>
 #include <QInputDialog>
 #include <QLineEdit>
@@ -70,6 +71,7 @@ struct Model {
 	std::string previewScene;        // plugin-side Preview bus (used when Studio Mode is off)
 	bool edit = true;                // show scene pickers under each cell
 	bool showSettings = false;       // settings panel expanded
+	bool warnAudio = false;          // warn about muted / missing audio on scenes
 	bool confirmNoSignal = false;    // ask before sending a no-signal scene to air
 	bool showPvw = true;             // show the PREVIEW box in the dock
 	bool showPgm = true;             // show the PROGRAM box in the dock
@@ -174,6 +176,74 @@ static bool sceneNameNoSignal(const std::string &name)
 	bool bad = sceneHasNoSignal(s, 0);
 	obs_source_release(s);
 	return bad;
+}
+
+// ------------------------------------------------------- audio warnings ----
+struct AudioCtx {
+	int depth;
+	int total;
+	int live; // unmuted
+};
+
+static void countAudio(obs_source_t *src, int depth, AudioCtx &c);
+
+static bool audioItemCb(obs_scene_t *, obs_sceneitem_t *item, void *p)
+{
+	auto *c = static_cast<AudioCtx *>(p);
+	if (!obs_sceneitem_visible(item))
+		return true;
+	obs_source_t *s = obs_sceneitem_get_source(item);
+	if (s)
+		countAudio(s, c->depth, *c);
+	return true;
+}
+
+static void countAudio(obs_source_t *src, int depth, AudioCtx &c)
+{
+	if (obs_source_get_type(src) == OBS_SOURCE_TYPE_SCENE) {
+		if (depth >= 4)
+			return;
+		obs_scene_t *sc = obs_scene_from_source(src);
+		if (!sc)
+			sc = obs_group_from_source(src);
+		if (!sc)
+			return;
+		AudioCtx sub{depth + 1, 0, 0};
+		obs_scene_enum_items(sc, audioItemCb, &sub);
+		c.total += sub.total;
+		c.live += sub.live;
+		return;
+	}
+	if (!(obs_source_get_output_flags(src) & OBS_SOURCE_AUDIO) || !obs_source_enabled(src))
+		return;
+	c.total++;
+	if (!obs_source_muted(src))
+		c.live++;
+}
+
+// 0 = fine, 1 = all audio sources muted, 2 = scene has no audio source
+static int sceneAudioStatus(const std::string &name)
+{
+	if (!g_model.warnAudio || name.empty())
+		return 0;
+	obs_source_t *s = obs_get_source_by_name(name.c_str());
+	if (!s)
+		return 0;
+	AudioCtx c{0, 0, 0};
+	countAudio(s, 0, c);
+	obs_source_release(s);
+	if (c.total == 0)
+		return 2;
+	return c.live == 0 ? 1 : 0;
+}
+
+static QString audioBadge(int st)
+{
+	if (st == 1)
+		return QStringLiteral("<span style='color:#f5a623'>\U0001F507 เสียงปิด</span>  \u00B7  ");
+	if (st == 2)
+		return QStringLiteral("<span style='color:#f5a623'>\U0001F507 ไม่มีเสียง</span>  \u00B7  ");
+	return QString();
 }
 
 // ------------------------------------------------------------ transitions ----
@@ -470,8 +540,10 @@ private:
 			t = QStringLiteral(
 				    "<span style='color:#f5a623'>\u26A0 \u0E44\u0E21\u0E48\u0E21\u0E35\u0E2A\u0E31\u0E0D\u0E0D\u0E32\u0E13</span>  \u00B7  ") +
 			    t;
+		int au = sceneAudioStatus(assignedName);
+		t = audioBadge(au) + t;
 		label->setText(t);
-		label->setVisible(!pickerShown || bad);
+		label->setVisible(!pickerShown || bad || au != 0);
 	}
 
 	void setTally(int t)
@@ -526,6 +598,9 @@ private:
 			t += QStringLiteral("  \u00B7  ") + QString::fromStdString(sceneName).toHtmlEscaped();
 		if (sceneNameNoSignal(sceneName))
 			t = QStringLiteral("<span style='color:#f5a623'>\u26A0 </span>") + t;
+		int au = sceneAudioStatus(sceneName);
+		if (au != 0)
+			t = QStringLiteral("<span style='color:#f5a623'>\U0001F507 </span>") + t;
 		label->setText(t);
 	}
 };
@@ -895,6 +970,15 @@ public:
 		presetBox->setMinimumContentsLength(8);
 		presetBox->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 
+		// LIVE / REC indicator (hidden when idle)
+		statusLabel = new QLabel;
+		statusLabel->setTextFormat(Qt::RichText);
+		statusLabel->setVisible(false);
+		v->addWidget(statusLabel);
+		auto *st = new QTimer(this);
+		connect(st, &QTimer::timeout, this, [this] { updateStatus(); });
+		st->start(1000);
+
 		// collapsible settings panel
 		panel = new QWidget;
 		auto *pv = new QVBoxLayout(panel);
@@ -942,6 +1026,9 @@ public:
 		showPgmBox->setToolTip("Show / hide the PROGRAM box");
 		h3->addWidget(showPvwBox);
 		h3->addWidget(showPgmBox);
+		warnAudioBox = new QCheckBox("Warn audio");
+		warnAudioBox->setToolTip("Mark scenes whose audio is muted or missing");
+		h3->addWidget(warnAudioBox);
 		confirmBox = new QCheckBox("Confirm no-signal");
 		confirmBox->setToolTip("Ask before sending a scene with no signal to Program");
 		h3->addWidget(confirmBox);
@@ -975,6 +1062,10 @@ public:
 			g_model.edit = on;
 			refreshAll();
 		});
+		connect(warnAudioBox, &QCheckBox::toggled, this, [](bool on) {
+			g_model.warnAudio = on;
+			refreshAll();
+		});
 		connect(confirmBox, &QCheckBox::toggled, this, [](bool on) { g_model.confirmNoSignal = on; });
 		connect(showPvwBox, &QCheckBox::toggled, this, [](bool on) {
 			g_model.showPvw = on;
@@ -991,7 +1082,8 @@ public:
 	void syncFromModel()
 	{
 		QSignalBlocker a(rowsBox), b(editBox), c(colsBox), d(presetBox), e(showPvwBox), f(showPgmBox),
-			g(confirmBox);
+			g(confirmBox), h(warnAudioBox);
+		warnAudioBox->setChecked(g_model.warnAudio);
 		confirmBox->setChecked(g_model.confirmNoSignal);
 		panel->setVisible(g_model.showSettings);
 		showPvwBox->setChecked(g_model.showPvw);
@@ -1007,8 +1099,39 @@ public:
 	}
 
 private:
+	qint64 streamStart = 0, recStart = 0;
+	QLabel *statusLabel;
+
+	static QString hms(qint64 ms)
+	{
+		qint64 s = ms / 1000;
+		return QString("%1:%2:%3")
+			.arg(s / 3600, 2, 10, QChar('0'))
+			.arg((s / 60) % 60, 2, 10, QChar('0'))
+			.arg(s % 60, 2, 10, QChar('0'));
+	}
+
+	void updateStatus()
+	{
+		const qint64 now = QDateTime::currentMSecsSinceEpoch();
+		bool live = obs_frontend_streaming_active(), rec = obs_frontend_recording_active();
+		streamStart = live ? (streamStart ? streamStart : now) : 0;
+		recStart = rec ? (recStart ? recStart : now) : 0;
+		QString t;
+		if (live)
+			t += QString("<span style='background:#5a1f22;color:#ffd9d9;padding:2px 8px;'>"
+				     "<span style='color:#ef4444'>\u25CF</span> LIVE %1</span>  ")
+				     .arg(hms(now - streamStart));
+		if (rec)
+			t += QString("<span style='background:#3a2a1f;color:#ffe2c2;padding:2px 8px;'>"
+				     "<span style='color:#f59e0b'>\u25CF</span> REC %1</span>")
+				     .arg(hms(now - recStart));
+		statusLabel->setText(t);
+		statusLabel->setVisible(live || rec);
+	}
+
 	QComboBox *presetBox, *rowsBox, *colsBox;
-	QCheckBox *editBox, *showPvwBox, *showPgmBox, *confirmBox;
+	QCheckBox *editBox, *showPvwBox, *showPgmBox, *confirmBox, *warnAudioBox;
 	QWidget *panel;
 	MultiviewGrid *grid;
 
@@ -1109,6 +1232,7 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 		obs_data_set_bool(d, "edit", g_model.edit);
 		obs_data_set_bool(d, "show_settings", g_model.showSettings);
 		obs_data_set_bool(d, "confirm_no_signal", g_model.confirmNoSignal);
+		obs_data_set_bool(d, "warn_audio", g_model.warnAudio);
 		obs_data_set_bool(d, "show_pvw", g_model.showPvw);
 		obs_data_set_bool(d, "show_pgm", g_model.showPgm);
 		auto scenesToArray = [](const std::vector<std::string> &v) {
@@ -1172,6 +1296,7 @@ static void saveCb(obs_data_t *save_data, bool saving, void *)
 		if (obs_data_has_user_value(d, "show_settings"))
 			g_model.showSettings = obs_data_get_bool(d, "show_settings");
 		g_model.confirmNoSignal = obs_data_get_bool(d, "confirm_no_signal");
+		g_model.warnAudio = obs_data_get_bool(d, "warn_audio");
 		if (obs_data_has_user_value(d, "show_pvw"))
 			g_model.showPvw = obs_data_get_bool(d, "show_pvw");
 		if (obs_data_has_user_value(d, "show_pgm"))
