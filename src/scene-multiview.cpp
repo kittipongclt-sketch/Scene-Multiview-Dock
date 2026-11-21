@@ -793,6 +793,9 @@ private:
 		if (name.empty())
 			return;
 		bool studio = obs_frontend_preview_program_mode_active();
+		// PREVIEW box hidden (dock) and no Studio Mode: a single click goes straight to Program.
+		if (allowPickers && !g_model.showPvw && !studio)
+			dbl = true;
 		if (!dbl && !studio) {
 			g_model.previewScene = name;
 			refreshAll();
