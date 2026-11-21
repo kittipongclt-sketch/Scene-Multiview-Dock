@@ -647,7 +647,9 @@ public:
 		if (allowPickers) {
 			auto *cutBtn = new QPushButton("CUT", topW);
 			cutBtn->setMinimumHeight(34);
-			cutBtn->setStyleSheet("font-weight:bold;");
+			cutBtn->setStyleSheet("QPushButton{font-weight:bold;background:#4a2a2e;color:#ffd9d9;}"
+					      "QPushButton:hover{background:#613238;}"
+					      "QPushButton:pressed{background:#7a3c44;}");
 			connect(cutBtn, &QPushButton::clicked, this, [] { takeToProgram(false); });
 			tg->addWidget(cutBtn, 1, 0);
 
@@ -657,7 +659,9 @@ public:
 			fl->setSpacing(4);
 			auto *fadeBtn = new QPushButton("FADE", fadeRow);
 			fadeBtn->setMinimumHeight(34);
-			fadeBtn->setStyleSheet("font-weight:bold;");
+			fadeBtn->setStyleSheet("QPushButton{font-weight:bold;background:#26394d;color:#d9ebff;}"
+					       "QPushButton:hover{background:#2f4a65;}"
+					       "QPushButton:pressed{background:#3a5c7d;}");
 			connect(fadeBtn, &QPushButton::clicked, this, [] { takeToProgram(true); });
 			auto *spin = new QDoubleSpinBox(fadeRow);
 			spin->setRange(0.1, 10.0);
@@ -890,13 +894,11 @@ public:
 		auto *h1 = new QHBoxLayout;
 		h1->addWidget(new QLabel("Layout"));
 		h1->addWidget(presetBox, 1);
-		pv->addLayout(h1);
-		auto *h2 = new QHBoxLayout;
 		auto *menuBtn = new QToolButton;
-		menuBtn->setText("Presets");
+		menuBtn->setText("Presets \u25BE");
 		menuBtn->setPopupMode(QToolButton::InstantPopup);
-		menuBtn->setStyleSheet("QToolButton{padding-right:20px;} QToolButton::menu-indicator{"
-				       "subcontrol-origin:padding;subcontrol-position:center right;right:6px;}");
+		menuBtn->setStyleSheet("QToolButton::menu-indicator{image:none;width:0;}");
+		menuBtn->setMinimumHeight(presetBox->sizeHint().height());
 		auto *menu = new QMenu(menuBtn);
 		connect(menu->addAction("Save current as new\u2026"), &QAction::triggered, this,
 			[this] { savePreset(); });
@@ -906,6 +908,8 @@ public:
 		connect(menu->addAction("Delete"), &QAction::triggered, this, [this] { deletePreset(); });
 		menuBtn->setMenu(menu);
 		h1->addWidget(menuBtn);
+		pv->addLayout(h1);
+		auto *h2 = new QHBoxLayout;
 		h2->addWidget(new QLabel("Rows"));
 		rowsBox = new QComboBox;
 		for (int n = 1; n <= 8; n++)
