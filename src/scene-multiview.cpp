@@ -198,6 +198,16 @@ static bool audioItemCb(obs_scene_t *, obs_sceneitem_t *item, void *p)
 	return true;
 }
 
+// Only real audio devices count (mic, desktop/app capture, capture cards). Browser overlays, media
+// players etc. also have an audio flag but are usually silent, so they would hide a muted mic.
+static bool isAudioDevice(obs_source_t *src)
+{
+	const char *id = obs_source_get_unversioned_id(src);
+	if (!id)
+		return false;
+	return std::strstr(id, "capture") || std::strstr(id, "input");
+}
+
 static void countAudio(obs_source_t *src, int depth, AudioCtx &c)
 {
 	if (obs_source_get_type(src) == OBS_SOURCE_TYPE_SCENE) {
@@ -214,7 +224,7 @@ static void countAudio(obs_source_t *src, int depth, AudioCtx &c)
 		c.live += sub.live;
 		return;
 	}
-	if (!(obs_source_get_output_flags(src) & OBS_SOURCE_AUDIO) || !obs_source_enabled(src))
+	if (!(obs_source_get_output_flags(src) & OBS_SOURCE_AUDIO) || !obs_source_enabled(src) || !isAudioDevice(src))
 		return;
 	c.total++;
 	if (!obs_source_muted(src))
@@ -232,6 +242,18 @@ static int sceneAudioStatus(const std::string &name)
 	AudioCtx c{0, 0, 0};
 	countAudio(s, 0, c);
 	obs_source_release(s);
+	// Global audio devices (Desktop Audio, Mic/Aux...) are heard in every scene.
+	for (uint32_t ch = 1; ch <= 6; ch++) {
+		obs_source_t *g = obs_get_output_source(ch);
+		if (!g)
+			continue;
+		if (obs_source_get_output_flags(g) & OBS_SOURCE_AUDIO) {
+			c.total++;
+			if (!obs_source_muted(g))
+				c.live++;
+		}
+		obs_source_release(g);
+	}
 	if (c.total == 0)
 		return 2;
 	return c.live == 0 ? 1 : 0;
