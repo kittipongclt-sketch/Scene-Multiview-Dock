@@ -10,6 +10,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QObject>
+#include <QAbstractSpinBox>
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QInputDialog>
@@ -652,7 +653,6 @@ public:
 					      "QPushButton:hover{background:#613238;}"
 					      "QPushButton:pressed{background:#7a3c44;}");
 			connect(cutBtn, &QPushButton::clicked, this, [] { takeToProgram(false); });
-			tg->addWidget(cutBtn, 1, 0);
 
 			auto *fadeRow = new QWidget(topW);
 			auto *fl = new QHBoxLayout(fadeRow);
@@ -673,6 +673,10 @@ public:
 			spin->setMinimumHeight(34);
 			connect(spin, &QDoubleSpinBox::valueChanged, this,
 				[](double v) { g_model.fadeMs = (int)(v * 1000.0 + 0.5); });
+			spin->setButtonSymbols(QAbstractSpinBox::NoButtons); // compact: type or use the wheel
+			spin->setAlignment(Qt::AlignCenter);
+			spin->setFixedWidth(52);
+			fl->addWidget(cutBtn, 1); // CUT and FADE share the width equally
 			fl->addWidget(fadeBtn, 1);
 			fl->addWidget(spin);
 			if (gearCb) {
@@ -685,7 +689,7 @@ public:
 				connect(gear, &QToolButton::toggled, this, [this](bool on) { gearCb(on); });
 				fl->addWidget(gear);
 			}
-			tg->addWidget(fadeRow, 1, 1);
+			tg->addWidget(fadeRow, 1, 0, 1, 2);
 		} else {
 			tg->setRowStretch(0, 1);
 		}
